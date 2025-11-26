@@ -203,11 +203,51 @@ class MediaReportController extends Controller
 
         // Geographic breakdown
         $geoBreakdown = array();
+
+        // Instead of looking up every user's location one after the other, get IDs first then fetch locations in one query
+        // foreach ($rawData['impressions'] as $impression) {
+        //     // Each impression has user_id - we need to look up their location
+        //     $user = User::model()->findByPk($impression->user_id);
+        //     if ($user) {
+        //         $country = $user->country;
+
+        //         if (!isset($geoBreakdown[$country])) {
+        //             $geoBreakdown[$country] = array(
+        //                 'impressions' => 0,
+        //                 'clicks' => 0
+        //             );
+        //         }
+
+        //         $geoBreakdown[$country]['impressions']++;
+        //     }
+        // }
+
+        // Collect IDs first from impressions
+        $userIds = array();
+
         foreach ($rawData['impressions'] as $impression) {
-            // Each impression has user_id - we need to look up their location
-            $user = User::model()->findByPk($impression->user_id);
-            if ($user) {
-                $country = $user->country;
+            $userIds[] = $impression->user_id;
+        }
+
+        $userIds = array_unique($userIds);
+
+        // Fetch all users in one query using IN clause
+        $users = array();
+        if (count($userIds) > 0) {
+            $userRecords = User::model()->findAll(array(
+                'condition' => 'id IN (' . implode(',', array_map('intval', $userIds)) . ')'
+            ));
+
+            // Index users by ID for quick lookup in the new userData associative array
+            foreach ($userRecords as $user) {
+                $users[$user->id] = $user;
+            }
+        }
+
+        // Use the indexed users to build geo breakdown for impressions
+        foreach ($rawData['impressions'] as $impression) {
+            if (isset($users[$impression->user_id])) {
+                $country = $users[$impression->user_id]->country;
 
                 if (!isset($geoBreakdown[$country])) {
                     $geoBreakdown[$country] = array(
@@ -220,10 +260,23 @@ class MediaReportController extends Controller
             }
         }
 
+        // Apply the same for clicks
+        // foreach ($rawData['clicks'] as $click) {
+        //     $user = User::model()->findByPk($click->user_id);
+        //     if ($user && isset($geoBreakdown[$user->country])) {
+        //         $geoBreakdown[$user->country]['clicks']++;
+        //     }
+        // }
+
+        // Since we already have the users indexed, we can directly use them
         foreach ($rawData['clicks'] as $click) {
-            $user = User::model()->findByPk($click->user_id);
-            if ($user && isset($geoBreakdown[$user->country])) {
-                $geoBreakdown[$user->country]['clicks']++;
+            if (isset($rawData->user_id)) {
+                $country = $users[$click->user_id]->country;
+
+                if (isset($geoBreakdown[$country])) {
+                    $geoBreakdown[$country]['clicks']++;
+                }
+
             }
         }
 
