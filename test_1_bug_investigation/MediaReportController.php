@@ -29,32 +29,32 @@ class MediaReportController extends Controller
         if (!$this->validateDates($startDate, $endDate)) {
             throw new CHttpException(400, 'Invalid date range');
         }
-        
+
         $campaign = Campaign::model()->findByPk($campaignId);
         if (!$campaign) {
             throw new CHttpException(404, 'Campaign not found');
         }
-        
+
         // Check if we have a cached version
         $cacheKey = "report_{$campaignId}_{$startDate}_{$endDate}";
         $cached = Yii::app()->cache->get($cacheKey);
-        
+
         if ($cached !== false) {
             $this->renderReport($cached);
             return;
         }
-        
+
         // Generate fresh report
         $reportData = $this->collectReportData($campaignId, $startDate, $endDate);
         $processedData = $this->processReportData($reportData);
         $finalReport = $this->generateReportSummary($processedData, $campaign);
-        
+
         // Cache for 24 hours
         Yii::app()->cache->set($cacheKey, $finalReport, 86400);
-        
+
         $this->renderReport($finalReport);
     }
-    
+
     /**
      * Collects raw report data from database
      * 
@@ -63,7 +63,7 @@ class MediaReportController extends Controller
     protected function collectReportData($campaignId, $startDate, $endDate)
     {
         $data = array();
-        
+
         // Get all impressions for this campaign in date range
         // Each impression record contains: timestamp, user_id, platform, location, etc.
         $impressions = Impression::model()->findAll(
@@ -74,10 +74,10 @@ class MediaReportController extends Controller
                 ':endDate' => $endDate
             )
         );
-        
+
         $data['total_impressions'] = count($impressions);
         $data['impressions'] = $impressions;
-        
+
         // Get click data
         $clicks = Click::model()->findAll(
             'campaign_id = :campaignId AND date >= :startDate AND date <= :endDate',
@@ -87,10 +87,10 @@ class MediaReportController extends Controller
                 ':endDate' => $endDate
             )
         );
-        
+
         $data['total_clicks'] = count($clicks);
         $data['clicks'] = $clicks;
-        
+
         // Get conversion data
         $conversions = Conversion::model()->findAll(
             'campaign_id = :campaignId AND date >= :startDate AND date <= :endDate',
@@ -100,13 +100,13 @@ class MediaReportController extends Controller
                 ':endDate' => $endDate
             )
         );
-        
+
         $data['total_conversions'] = count($conversions);
         $data['conversions'] = $conversions;
-        
+
         return $data;
     }
-    
+
     /**
      * Processes raw data into report metrics
      * 
@@ -115,31 +115,31 @@ class MediaReportController extends Controller
     protected function processReportData($rawData)
     {
         $processed = array();
-        
+
         // Calculate metrics
         $processed['total_impressions'] = $rawData['total_impressions'];
         $processed['total_clicks'] = $rawData['total_clicks'];
         $processed['total_conversions'] = $rawData['total_conversions'];
-        
+
         // Calculate CTR
         if ($processed['total_impressions'] > 0) {
             $processed['ctr'] = ($processed['total_clicks'] / $processed['total_impressions']) * 100;
         } else {
             $processed['ctr'] = 0;
         }
-        
+
         // Calculate conversion rate
         if ($processed['total_clicks'] > 0) {
             $processed['conversion_rate'] = ($processed['total_conversions'] / $processed['total_clicks']) * 100;
         } else {
             $processed['conversion_rate'] = 0;
         }
-        
+
         // Break down by platform
         $platformBreakdown = array();
         foreach ($rawData['impressions'] as $impression) {
             $platform = $impression->platform;
-            
+
             if (!isset($platformBreakdown[$platform])) {
                 $platformBreakdown[$platform] = array(
                     'impressions' => 0,
@@ -147,10 +147,10 @@ class MediaReportController extends Controller
                     'conversions' => 0
                 );
             }
-            
+
             $platformBreakdown[$platform]['impressions']++;
         }
-        
+
         // Now count clicks per platform
         foreach ($rawData['clicks'] as $click) {
             $platform = $click->platform;
@@ -158,7 +158,7 @@ class MediaReportController extends Controller
                 $platformBreakdown[$platform]['clicks']++;
             }
         }
-        
+
         // Count conversions per platform
         foreach ($rawData['conversions'] as $conversion) {
             $platform = $conversion->platform;
@@ -166,14 +166,14 @@ class MediaReportController extends Controller
                 $platformBreakdown[$platform]['conversions']++;
             }
         }
-        
+
         $processed['platform_breakdown'] = $platformBreakdown;
-        
+
         // Daily breakdown
         $dailyBreakdown = array();
         foreach ($rawData['impressions'] as $impression) {
             $date = date('Y-m-d', strtotime($impression->date));
-            
+
             if (!isset($dailyBreakdown[$date])) {
                 $dailyBreakdown[$date] = array(
                     'impressions' => 0,
@@ -181,26 +181,26 @@ class MediaReportController extends Controller
                     'conversions' => 0
                 );
             }
-            
+
             $dailyBreakdown[$date]['impressions']++;
         }
-        
+
         foreach ($rawData['clicks'] as $click) {
             $date = date('Y-m-d', strtotime($click->date));
             if (isset($dailyBreakdown[$date])) {
                 $dailyBreakdown[$date]['clicks']++;
             }
         }
-        
+
         foreach ($rawData['conversions'] as $conversion) {
             $date = date('Y-m-d', strtotime($conversion->date));
             if (isset($dailyBreakdown[$date])) {
                 $dailyBreakdown[$date]['conversions']++;
             }
         }
-        
+
         $processed['daily_breakdown'] = $dailyBreakdown;
-        
+
         // Geographic breakdown
         $geoBreakdown = array();
         foreach ($rawData['impressions'] as $impression) {
@@ -208,30 +208,30 @@ class MediaReportController extends Controller
             $user = User::model()->findByPk($impression->user_id);
             if ($user) {
                 $country = $user->country;
-                
+
                 if (!isset($geoBreakdown[$country])) {
                     $geoBreakdown[$country] = array(
                         'impressions' => 0,
                         'clicks' => 0
                     );
                 }
-                
+
                 $geoBreakdown[$country]['impressions']++;
             }
         }
-        
+
         foreach ($rawData['clicks'] as $click) {
             $user = User::model()->findByPk($click->user_id);
             if ($user && isset($geoBreakdown[$user->country])) {
                 $geoBreakdown[$user->country]['clicks']++;
             }
         }
-        
+
         $processed['geo_breakdown'] = $geoBreakdown;
-        
+
         return $processed;
     }
-    
+
     /**
      * Generates final report with campaign details
      */
@@ -244,10 +244,10 @@ class MediaReportController extends Controller
             'metrics' => $processedData,
             'generated_at' => date('Y-m-d H:i:s')
         );
-        
+
         return $summary;
     }
-    
+
     /**
      * Renders report as JSON or PDF
      */
@@ -260,7 +260,7 @@ class MediaReportController extends Controller
             echo json_encode($reportData);
         }
     }
-    
+
     /**
      * Validates date inputs
      */
@@ -268,18 +268,18 @@ class MediaReportController extends Controller
     {
         $start = strtotime($startDate);
         $end = strtotime($endDate);
-        
+
         if ($start === false || $end === false) {
             return false;
         }
-        
+
         if ($start > $end) {
             return false;
         }
-        
+
         return true;
     }
-    
+
     /**
      * Renders report as PDF
      * Added by Peter O. - 2022
@@ -288,16 +288,16 @@ class MediaReportController extends Controller
     {
         // PDF generation logic here
         // Uses TCPDF library
-        
+
         Yii::import('application.vendors.tcpdf.*');
         require_once('tcpdf.php');
-        
+
         $pdf = new TCPDF();
         $pdf->AddPage();
-        
+
         $html = $this->renderPartial('_report_template', array('data' => $reportData), true);
         $pdf->writeHTML($html, true, false, true, false, '');
-        
+
         $pdf->Output('report.pdf', 'D');
     }
 }
